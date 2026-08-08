@@ -244,7 +244,7 @@ Test Case
 
 - 사용자 입력(3×3) 예시
 
-```css
+```text
 $ python [main.py](<http://main.py/>)
 
 === Mini NPU Simulator ===
@@ -306,7 +306,7 @@ B 점수: 0.8999999999999999
 
 - `data.json` 분석 예시
 
-```css
+```text
 $ python [main.py](<http://main.py/>)
 
 === Mini NPU Simulator ===
