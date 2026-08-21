@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0.1의 배신 — size_5_1이 UNDECIDED가 된 이유</title>
+<meta name="description" content="0.1을 9번 더하면 왜 0.8999999999999999가 되는지, IEEE 754 부동소수점 처리 과정을 실측 로그와 두들 애니메이션으로 설명">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gaegu:wght@400;700&family=Nanum+Pen+Script&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<style>
+:root{
+  --paper:#ffffff; --grid:rgba(58,110,165,.10); --card:#ffffff;
+  --ink:#33322e; --ink-soft:#77746a; --line:#4a4842;
+  --red:#d9483b; --blue:#3a6ea5; --hl:rgba(247,215,116,.55);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--paper);
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size:26px 26px;
+  color:var(--ink);
+  font-family:'Gaegu','Comic Sans MS',cursive;
+  font-size:20px; line-height:1.55;
+  min-height:100vh;
+}
+.wrap{max-width:860px;margin:0 auto;padding:36px 20px 90px}
+.eyebrow{font-size:16px;letter-spacing:.14em;color:var(--ink-soft);text-transform:uppercase}
+h1{
+  font-family:'Nanum Pen Script',cursive;font-weight:400;
+  font-size:clamp(44px,8vw,72px);line-height:1.05;margin:.1em 0 .15em;
+  text-wrap:balance;
+}
+h1 .strike{position:relative;white-space:nowrap}
+h1 .strike::after{
+  content:"";position:absolute;left:-3%;right:-3%;top:54%;height:4px;
+  background:var(--red);border-radius:3px;transform:rotate(-2deg);
+}
+h1 .oops{color:var(--red)}
+.sub{color:var(--ink-soft);margin:0 0 30px;max-width:62ch}
+h2.sect{
+  font-family:'Nanum Pen Script',cursive;font-weight:400;
+  font-size:clamp(34px,5.5vw,48px);margin:60px 0 6px;line-height:1.1;
+}
+h2.sect .no{color:var(--blue);margin-right:.3em}
+.sect-lead{color:var(--ink-soft);margin:0 0 20px;max-width:64ch}
+.mono{font-family:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-variant-numeric:tabular-nums;font-size:.82em}
+.hl{background:linear-gradient(transparent 45%,var(--hl) 45%);padding:0 .1em}
+
+.doodle{
+  background:var(--card);
+  border:2.5px solid var(--line);
+  border-radius:255px 18px 225px 18px/18px 225px 18px 255px;
+  padding:22px 24px;
+  box-shadow:3px 4px 0 rgba(0,0,0,.08);
+}
+.tilt-l{transform:rotate(-.5deg)} .tilt-r{transform:rotate(.4deg)}
+
+/* ---- 요약 ---- */
+ol.summary{margin:0;padding-left:1.3em}
+ol.summary li{margin:.45em 0}
+ol.summary b{background:linear-gradient(transparent 45%,var(--hl) 45%)}
+
+/* ---- 장면 플레이어 ---- */
+.dots{display:flex;gap:10px;align-items:center;margin:6px 0 18px;flex-wrap:wrap}
+.dots button{
+  width:38px;height:38px;font:inherit;font-size:18px;cursor:pointer;
+  color:var(--ink);background:var(--card);border:2px solid var(--line);
+  border-radius:60% 40% 55% 45%/45% 55% 40% 60%;
+}
+.dots button.on{background:var(--red);border-color:var(--red);color:#fff;font-weight:700}
+.dots button:focus-visible,.ctrl button:focus-visible{outline:3px dashed var(--blue);outline-offset:3px}
+.scene{display:none}
+.scene.active{display:block;animation:sceneIn .45s ease both}
+@keyframes sceneIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+.scene h3{
+  font-family:'Nanum Pen Script',cursive;font-weight:400;
+  font-size:clamp(30px,4.5vw,40px);margin:0 0 4px;line-height:1.1;
+}
+.scene h3 .no{color:var(--blue);margin-right:.25em}
+.scene .lead{color:var(--ink-soft);margin:0 0 20px;max-width:62ch}
+.ctrl{display:flex;gap:14px;justify-content:space-between;align-items:center;margin-top:28px}
+.ctrl button{
+  font:inherit;font-size:22px;cursor:pointer;padding:8px 26px;
+  color:var(--ink);background:var(--card);border:2.5px solid var(--line);
+  border-radius:18px 225px 18px 255px/255px 18px 225px 18px;
+}
+.ctrl button:hover:not(:disabled){background:var(--hl)}
+.ctrl button:disabled{opacity:.35;cursor:default}
+.ctrl .where{color:var(--ink-soft);font-size:17px}
+
+.rise{opacity:0;animation:rise .5s ease var(--d,0s) forwards}
+@keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.pop{opacity:0;animation:pop .38s cubic-bezier(.34,1.56,.64,1) var(--d,0s) forwards}
+@keyframes pop{from{opacity:0;transform:scale(.4)}to{opacity:1;transform:scale(1)}}
+
+.stage1{display:flex;gap:26px;flex-wrap:wrap;align-items:flex-start}
+.xgrid{display:grid;grid-template-columns:repeat(5,44px);gap:5px;padding:14px}
+.xgrid .c{width:44px;height:44px;border:2px solid var(--line);
+  border-radius:35% 65% 55% 45%/55% 40% 60% 45%}
+.xgrid .c.on{background:repeating-linear-gradient(45deg,var(--blue) 0 3px,transparent 3px 7px)}
+.scorecard{flex:1;min-width:260px}
+.scorecard p{margin:.35em 0}
+.big-wrong{font-size:26px}
+.verdict{color:var(--red);font-weight:700}
+
+.mulsteps{list-style:none;margin:0 0 16px;padding:0}
+.mulsteps li{display:flex;gap:14px;align-items:baseline;padding:3px 0}
+.mulsteps .bit{
+  font-family:'IBM Plex Mono',monospace;font-weight:600;width:1.4em;text-align:center;
+  border:2px solid var(--line);border-radius:50% 45% 55% 48%;
+}
+.mulsteps .bit.b1{background:var(--hl)}
+.mulsteps .note{color:var(--red);font-size:17px}
+.binline{font-size:19px;overflow-x:auto;white-space:nowrap;padding-bottom:6px}
+.binline .rep{color:var(--red);font-weight:600;border-bottom:3px dotted var(--red)}
+
+.bitstrip{
+  display:flex;align-items:center;overflow-x:auto;padding:16px 6px 30px;
+  font-family:'IBM Plex Mono',monospace;font-size:17px;
+}
+.bitstrip .b{padding:3px 2px;border-bottom:2px solid var(--line)}
+.bitstrip .cutmark{color:var(--red);font-size:26px;padding:0 4px;transform:translateY(-6px)}
+.bitstrip .b.fall{color:var(--red);border-bottom-color:var(--red);
+  animation:fall 1.1s ease var(--d,0s) forwards}
+@keyframes fall{to{opacity:0;transform:translateY(46px) rotate(24deg)}}
+.stored{margin-top:10px}
+.stored .val{word-break:break-all}
+.plus{color:var(--red);font-weight:700}
+
+.logwrap{overflow-x:auto}
+table.log{border-collapse:collapse;width:100%;min-width:660px;font-size:17px}
+table.log th,table.log td{
+  text-align:left;padding:6px 10px;border-bottom:2px dashed var(--grid);white-space:nowrap;
+}
+table.log th{font-weight:700;color:var(--ink-soft);border-bottom:2.5px solid var(--line)}
+table.log .mono{font-size:15px}
+table.log tr.hot td{background:var(--hl)}
+.meter{position:relative;width:120px;height:14px;display:inline-block;vertical-align:middle;
+  border-bottom:2px solid var(--grid)}
+.meter .zero{position:absolute;left:64%;top:0;bottom:-2px;width:2px;background:var(--ink-soft)}
+.meter .dot{position:absolute;top:2px;width:10px;height:10px;border-radius:50%;
+  background:var(--red);transform:translateX(-50%)}
+.meter .dot.pos{background:var(--blue)}
+.legend{color:var(--ink-soft);font-size:16px;margin-top:10px}
+.legend .b{color:var(--blue)} .legend .r{color:var(--red)}
+
+.ruler{padding:10px 6px 0;overflow-x:auto}
+.ruler svg{display:block;min-width:640px;width:100%;height:auto}
+.ruler text{font-family:'Gaegu',cursive;fill:var(--ink);font-size:15px}
+.ruler .m{font-family:'IBM Plex Mono',monospace;font-size:12.5px}
+.ruler .soft{fill:var(--ink-soft)}
+.ruler .redt{fill:var(--red)}
+.ruler .axis{stroke:var(--line);stroke-width:2.5;stroke-linecap:round}
+.ruler .tick{stroke:var(--line);stroke-width:2.5}
+.ruler .land{stroke:var(--red);stroke-width:2.5;fill:none;stroke-linecap:round}
+.star{fill:var(--red)}
+.drop-star{animation:dropStar .9s cubic-bezier(.3,1.4,.6,1) .8s both}
+@keyframes dropStar{from{opacity:0;transform:translateY(-34px)}to{opacity:1;transform:none}}
+.draw{stroke-dasharray:300;stroke-dashoffset:300;animation:draw 1s ease 1.5s forwards}
+@keyframes draw{to{stroke-dashoffset:0}}
+
+pre.code{
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:15px;line-height:1.6;
+  margin:0;overflow-x:auto;padding:18px 20px;tab-size:4;
+}
+pre.code .k{color:var(--blue);font-weight:600}
+pre.code .c{color:var(--ink-soft)}
+pre.log-out{
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13.5px;line-height:1.55;
+  margin:0;overflow-x:auto;padding:18px 20px;
+}
+.final{font-size:24px;margin-top:18px}
+.stampbox{display:inline-block;margin-top:14px;padding:6px 18px;
+  border:3px solid var(--red);color:var(--red);font-weight:700;font-size:26px;
+  border-radius:14px 200px 12px 220px/220px 12px 200px 14px;transform:rotate(-3deg)}
+.stamp{animation:stampIn .4s cubic-bezier(.34,1.6,.64,1) 1.4s both}
+@keyframes stampIn{from{opacity:0;transform:rotate(-3deg) scale(2)}to{opacity:1;transform:rotate(-3deg) scale(1)}}
+footer{margin-top:70px;color:var(--ink-soft);font-size:16px}
+
+@media (prefers-reduced-motion: reduce){
+  .rise,.pop,.scene.active,.bitstrip .b.fall,.drop-star,.draw,.stamp{animation:none!important;opacity:1!important}
+  .draw{stroke-dashoffset:0!important}
+  .bitstrip .b.fall{transform:none}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <p class="eyebrow">Codyssey Mission 3 · size_5_1 사건 기록</p>
+    <h1>0.1을 아홉 번 더하면<br><span class="strike">0.9</span> <span class="oops mono">0.8999999999999999</span></h1>
+    <p class="sub">Mini NPU Simulator의 size_5_1 케이스가 UNDECIDED로 FAIL한 진짜 이유 —
+    컴퓨터가 소수를 다루는 방식을 요약, 애니메이션, 추적 스크립트, 실측 로그로 정리했음.
+    (수치는 전부 Python 3.9.6 실측값)</p>
+  </header>
+
+  <!-- ════════ 1. 요약 설명 ════════ -->
+  <section>
+    <h2 class="sect"><span class="no">1.</span>요약 설명</h2>
+    <p class="sect-lead">한 문장으로: <b>0.1은 2진수로 저장할 수 없는 수라서,
+    저장할 때 한 번·더할 때마다 또 한 번 반올림되며 생긴 오차가 마지막에 한 눈금(1 ULP) 아래로 착지한 것.</b></p>
+    <div class="doodle tilt-l">
+      <ol class="summary">
+        <li>size_5_1의 X 점수는 대각선 9칸 × 0.1의 곱-누적, 즉 <b>0.1을 9번 더한 값</b>.</li>
+        <li>0.1은 2진수로 <span class="mono">0.000110011001100…</span> 무한 반복 소수라 정확히 표현 불가.
+            float(IEEE 754)은 53비트에서 반올림해 <b>0.1보다 +5.55×10⁻¹⁸ 큰 값</b>을 저장.</li>
+        <li>float 덧셈은 매번 결과를 다시 53비트로 반올림. 누적 오차가 +로 부풀다(3단계 +4.44×10⁻¹⁷)
+            0.5에서 정확히 0이 되고, 이후 −로 밀림.</li>
+        <li>마지막 덧셈의 참값 <span class="mono">0.89999999999999993894…</span>는 0.9의 저장값보다
+            아래 눈금에 더 가까워(2.78e-17 vs 8.33e-17) <b>0.8999999999999999로 반올림</b>.
+            0.9의 저장값과 정확히 1 ULP(1.11×10⁻¹⁶) 차이.</li>
+        <li>이 차이는 계산 오류가 아니라 저장 방식의 노이즈. main.py의 <span class="mono">decide()</span>는
+            |차이| &lt; ε(10⁻⁹)이면 <b>UNDECIDED로 신고</b>하고, expected와 다르므로 규칙상 FAIL로 집계
+            — 의도된 동작.</li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- ════════ 2. 애니메이션 ════════ -->
+  <section>
+    <h2 class="sect"><span class="no">2.</span>두들 애니메이션 — 여섯 장면</h2>
+    <p class="sect-lead">아래 번호나 ← → 키로 장면을 넘기면서 보면 됨.</p>
+
+    <nav class="dots" aria-label="장면 이동"></nav>
+
+    <article class="scene" data-n="1">
+      <h3><span class="no">#1</span>사건: X 필터 점수가 이상하다</h3>
+      <p class="lead">size_5_1의 입력은 대각선 9칸이 1.0인 X 패턴, X 필터는 같은 자리가 0.1.
+      그러니 MAC 점수는 <b>0.1을 9번 더한 값</b>이 된다.</p>
+      <div class="stage1">
+        <div class="doodle tilt-l xgrid" aria-label="5×5 X 패턴, 대각선 9칸이 켜져 있음"></div>
+        <div class="doodle tilt-r scorecard rise" style="--d:1.4s">
+          <p class="mono">Cross 점수: 0.9</p>
+          <p class="mono big-wrong">X 점수: <span class="hl">0.8999999999999999</span></p>
+          <p><span class="verdict">판정: UNDECIDED → FAIL</span></p>
+          <p>0.1 × 9 = 0.9 아니었나…?<br>계산기는 맞고, <b>저장</b>이 문제였다.</p>
+        </div>
+      </div>
+    </article>
+
+    <article class="scene" data-n="2">
+      <h3><span class="no">#2</span>컴퓨터는 2진수로만 센다</h3>
+      <p class="lead">0.1을 2진수로 바꾸려면 계속 2를 곱하며 정수부를 떼어낸다.
+      그런데 이 과정이 <b>영원히 끝나지 않는다.</b></p>
+      <div class="doodle tilt-l">
+        <ol class="mulsteps">
+          <li class="rise" style="--d:.1s"><span class="mono">0.1 × 2 = 0.2</span><span class="bit">0</span></li>
+          <li class="rise" style="--d:.5s"><span class="mono">0.2 × 2 = 0.4</span><span class="bit">0</span></li>
+          <li class="rise" style="--d:.9s"><span class="mono">0.4 × 2 = 0.8</span><span class="bit">0</span></li>
+          <li class="rise" style="--d:1.3s"><span class="mono">0.8 × 2 = 1.6</span><span class="bit b1">1</span><span class="note">1을 떼고 0.6</span></li>
+          <li class="rise" style="--d:1.7s"><span class="mono">0.6 × 2 = 1.2</span><span class="bit b1">1</span><span class="note">1을 떼고 0.2</span></li>
+          <li class="rise" style="--d:2.1s"><span class="mono">0.2 × 2 = 0.4</span><span class="bit">0</span><span class="note">← 어? 0.2로 되돌아왔다!</span></li>
+        </ol>
+        <p class="rise" style="--d:2.6s;margin:0">0.2로 돌아온 순간부터 같은 계산이 무한히 반복된다:</p>
+        <p class="binline mono rise" style="--d:3s">0.1<sub>(10)</sub> = 0.000<span class="rep">1100</span><span class="rep">1100</span><span class="rep">1100</span><span class="rep">1100</span>…<sub>(2)</sub></p>
+      </div>
+      <p class="rise" style="--d:3.4s">우리가 1/3을 십진수로 0.3333…밖에 못 쓰는 것과 똑같다.
+      <b>1/10은 2진수의 세계에서 무한소수다.</b></p>
+    </article>
+
+    <article class="scene" data-n="3">
+      <h3><span class="no">#3</span>서랍은 53칸뿐</h3>
+      <p class="lead">float(IEEE 754 배정밀도)가 소수를 담는 서랍(가수부)은 딱 <b>53비트.</b>
+      무한히 이어지는 1100…을 53칸에서 잘라내고 반올림한다.</p>
+      <div class="doodle tilt-r bitstrip" aria-label="53비트 이후의 비트가 잘려 떨어지는 그림"></div>
+      <div class="doodle tilt-l stored rise" style="--d:1.9s">
+        <p style="margin:0 0 6px">그래서 float 안에 실제로 저장된 값은 0.1이 아니라:</p>
+        <p class="mono val" style="margin:0 0 6px">0.100000000000000005551115123125…<br>= 3602879701896397 / 2<sup>55</sup></p>
+        <p style="margin:0">0.1보다 <span class="plus">+5.55×10⁻¹⁸</span> 만큼 크다. 시작부터 이미 어긋나 있다.</p>
+      </div>
+    </article>
+
+    <article class="scene" data-n="4">
+      <h3><span class="no">#4</span>덧셈할 때마다 또 반올림</h3>
+      <p class="lead">float 덧셈은 <b>더하고 → 다시 53비트로 반올림</b>의 반복.
+      아래는 main.py의 mac()이 실제로 밟은 9단계다 (0인 16칸은 생략).</p>
+      <div class="doodle tilt-l logwrap">
+        <table class="log">
+          <thead><tr>
+            <th>단계</th><th>(i,j)</th><th>파이썬 출력(repr)</th><th>실제 저장값</th><th>오차 드리프트</th>
+          </tr></thead>
+          <tbody id="logbody"></tbody>
+        </table>
+        <p class="legend rise" style="--d:4.6s">
+          오차가 <span class="b">+쪽</span>으로 부풀다가(3단계) 반올림이 끌어내려 0.5에서 정확히 0,
+          이후 <span class="r">−쪽</span>으로 밀리며 끝내 <b>0.9보다 한 눈금 아래</b>에 도착한다.</p>
+      </div>
+    </article>
+
+    <article class="scene" data-n="5">
+      <h3><span class="no">#5</span>눈금 위의 착지</h3>
+      <p class="lead">float가 표현할 수 있는 수는 눈금(간격 1 ULP = 1.11×10⁻¹⁶)뿐.
+      마지막 덧셈의 참값은 눈금 사이에 떨어지고, <b>더 가까운 눈금</b>으로 반올림된다.</p>
+      <div class="doodle tilt-r ruler">
+        <svg viewBox="0 0 700 250" role="img" aria-label="참값이 0.9 아래 눈금에 더 가까워 그쪽으로 반올림되는 수직선 그림">
+          <line class="axis" x1="30" y1="150" x2="670" y2="150"/>
+          <line class="tick" x1="120" y1="132" x2="120" y2="168"/>
+          <line class="tick" x1="580" y1="132" x2="580" y2="168"/>
+          <text x="120" y="192" text-anchor="middle" class="m">0.89999999999999991…</text>
+          <text x="120" y="212" text-anchor="middle">← 아래 눈금 (repr: 0.8999999999999999)</text>
+          <text x="580" y="192" text-anchor="middle" class="m">0.90000000000000002…</text>
+          <text x="580" y="212" text-anchor="middle">위 눈금 (repr: 0.9) →</text>
+          <g class="drop-star">
+            <path class="star" transform="translate(235 150)" d="M0,-13 L3.5,-4 13,-4 5.5,2 8,11 0,5.5 -8,11 -5.5,2 -13,-4 -3.5,-4 Z"/>
+            <text x="235" y="118" text-anchor="middle" class="redt">반올림 전 참값</text>
+            <text x="235" y="100" text-anchor="middle" class="m redt">0.89999999999999993894…</text>
+          </g>
+          <path class="land draw" d="M228 158 C 200 190, 160 190, 128 162"/>
+          <path class="land draw" d="M136 172 L 126 160 L 142 158"/>
+          <text x="178" y="140" text-anchor="middle" class="m">거리 2.78e-17</text>
+          <text x="410" y="140" text-anchor="middle" class="m soft">거리 8.33e-17 (멀다)</text>
+          <text x="350" y="238" text-anchor="middle" class="soft">눈금 간격 = 1 ULP = 1.11e-16 — 이 사이의 수는 존재할 수 없다</text>
+        </svg>
+      </div>
+      <p class="rise" style="--d:2.2s">그래서 최종 합은 <span class="mono">0.8999999999999999</span>.
+      한편 코드에 적은 0.9도 사실은 위 눈금 <span class="mono">0.90000000000000002…</span>에 저장된다.
+      둘은 <b>딱 1 ULP</b> 차이.</p>
+    </article>
+
+    <article class="scene" data-n="6">
+      <h3><span class="no">#6</span>그래서, 판정하지 않기로 했다</h3>
+      <p class="lead">1.1×10⁻¹⁶은 계산 오류가 아니라 <b>저장 방식이 만든 노이즈</b>.
+      이런 차이로 승부를 가르면 사실상 동전 던지기다. main.py의 대응:</p>
+      <div class="doodle tilt-l">
+<pre class="code"><span class="k">EPSILON</span> = 1e-9
+
+<span class="k">def</span> decide(score_a, score_b, label_a, label_b):
+    <span class="c"># 노이즈 수준의 차이는 승패로 인정하지 않는다</span>
+    <span class="k">if</span> abs(score_a - score_b) &lt; EPSILON:
+        <span class="k">return</span> UNDECIDED
+    <span class="k">return</span> label_a <span class="k">if</span> score_a &gt; score_b <span class="k">else</span> label_b</pre>
+      </div>
+      <p class="final rise" style="--d:.6s">|Cross − X| = |0.9 − 0.8999999999999999| = <span class="mono">1.11×10⁻¹⁶</span> &lt; ε(10⁻⁹)</p>
+      <div class="stampbox stamp">UNDECIDED — 판정 보류</div>
+      <p class="rise" style="--d:1.9s">size_5_1의 FAIL은 버그의 흔적이 아니라,
+      <b>부동소수점의 한계를 알고 정직하게 신고한 흔적</b>이다.</p>
+    </article>
+
+    <div class="ctrl">
+      <button id="prev" aria-label="이전 장면">← 이전</button>
+      <span class="where" id="where"></span>
+      <button id="next" aria-label="다음 장면">다음 →</button>
+    </div>
+  </section>
+
+  <!-- ════════ 3. 추적 스크립트 소스 ════════ -->
+  <section>
+    <h2 class="sect"><span class="no">3.</span>float_trace.py — 추적 스크립트</h2>
+    <p class="sect-lead">main.py의 <span class="mono">mac()</span>과 같은 행 우선 순서로 곱-누적하며,
+    매 단계 float에 실제로 저장된 값(<span class="mono">Decimal</span> 전개)과
+    이론값(<span class="mono">Fraction</span>)의 차이를 출력함.</p>
+    <div class="doodle tilt-l">
+<pre class="code">"""size_5_1 × X 필터 MAC이 0.8999999999999999가 되는 과정 추적.
+
+main.py의 mac()과 같은 순서(행 우선)로 곱-누적하면서,
+매 단계 float에 '실제로 저장된 값'(십진 전개)과 이론값의 차이를 로그로 출력.
+"""
+<span class="k">import</span> json
+<span class="k">import</span> math
+<span class="k">import</span> os
+<span class="k">from</span> decimal <span class="k">import</span> Decimal
+<span class="k">from</span> fractions <span class="k">import</span> Fraction
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_PATH = os.path.join(BASE_DIR, '..', '..', 'codyssey-e1-3', 'data.json')
+
+
+<span class="k">def</span> exact(value, digits=22):
+    <span class="c">"""float에 실제로 저장된 값을 십진수로 그대로 전개한다."""</span>
+    <span class="k">return</span> str(Decimal(value))[:digits + 2]
+
+
+<span class="k">def</span> main():
+    <span class="k">with</span> open(DATA_PATH, 'r', encoding='utf-8') <span class="k">as</span> f:
+        data = json.load(f)
+    pattern = data['patterns']['size_5_1']['input']
+    x_filter = data['filters']['size_5']['x']
+
+    print('=' * 100)
+    print('size_5_1 패턴 × X 필터 MAC 추적 (main.py mac()과 같은 행 우선 순서)')
+    print('=' * 100)
+    print()
+    print('[0] 재료 확인: 0.1은 float에 어떻게 저장되나')
+    print(f'    입력한 값        : 0.1')
+    print(f'    실제 저장된 값   : {exact(0.1, 30)}...')
+    print(f'    분수로 정확히    : {Fraction(0.1)}')
+    print(f'                      = 3602879701896397 / 2^55  (0.1보다 5.55e-18 큼)')
+    print(f'    2진수 전개       : 0.0001100110011001100... (1100 무한 반복 → 53비트에서 반올림)')
+    print()
+    print('[1] 곱-누적 로그 (곱이 0인 16칸은 합을 바꾸지 않으므로 생략)')
+    print()
+    header = (f"{'단계':&gt;4} {'(i,j)':&gt;6} {'p×f':&gt;8} "
+              f"{'repr(누적합) — 파이썬이 출력하는 값':&lt;24} "
+              f"{'float에 실제 저장된 값':&lt;26} {'이론값':&gt;6} {'오차':&gt;12}")
+    print(header)
+    print('-' * 100)
+
+    total = 0.0
+    step = 0
+    <span class="k">for</span> i, (row_p, row_f) <span class="k">in</span> enumerate(zip(pattern, x_filter)):
+        <span class="k">for</span> j, (p, fv) <span class="k">in</span> enumerate(zip(row_p, row_f)):
+            <span class="k">if</span> p * fv == 0.0:
+                <span class="k">continue</span>
+            step += 1
+            total += p * fv
+            ideal = Fraction(1, 10) * step
+            err = float(Fraction(total) - ideal)
+            print(f'{step:&gt;4} ({i},{j})  {p:g}×{fv:g}  '
+                  f'{total!r:&lt;26} {exact(total):&lt;28} '
+                  f'{float(ideal):&gt;6.1f} {err:&gt;+12.2e}')
+
+    print('-' * 100)
+    print()
+    print('[2] 마지막 덧셈 확대: 8번째 합 + 0.1 이 왜 0.9에 못 미치나')
+    s8 = 0.0
+    <span class="k">for</span> _ <span class="k">in</span> range(8):
+        s8 += 0.1
+    stored_01 = Fraction(0.1)
+    exact_sum = Fraction(s8) + stored_01          <span class="c"># 반올림 전의 참값</span>
+    print(f'    8단계 합(저장값)      : {exact(s8)}')
+    print(f'    + 저장된 0.1          : {exact(0.1)}')
+    print(f'    = 반올림 전 참값      : '
+          f'{str(Decimal(exact_sum.numerator) / Decimal(exact_sum.denominator))[:24]}')
+    lo, hi = 0.8999999999999999, 0.9
+    print(f'    이 참값 근처의 float 눈금 (간격 = 1 ULP = {math.ulp(0.9):.2e}):')
+    print(f'      아래 눈금: {exact(lo)}  ← 참값과의 거리 {float(Fraction(exact_sum) - Fraction(lo)):.3e}')
+    print(f'      위   눈금: {exact(hi)}  ← 참값과의 거리 {float(Fraction(hi) - Fraction(exact_sum)):.3e}')
+    print(f'    → 참값이 아래 눈금에 더 가까워서 {lo!r} 로 반올림됨')
+    print()
+    print('[3] 판정에 미치는 영향')
+    cross, x = 0.9, s8 + 0.1
+    print(f'    Cross 점수: {cross!r}   (실제 저장값 {exact(cross)})')
+    print(f'    X     점수: {x!r}   (실제 저장값 {exact(x)})')
+    print(f'    x == 0.9        → {x == 0.9}')
+    print(f'    |Cross − X|     → {abs(cross - x):.3e}')
+    print(f'    epsilon(1e-9)   → {abs(cross - x):.3e} &lt; 1e-9 → UNDECIDED (판정하지 않음)')
+
+
+<span class="k">if</span> __name__ == '__main__':
+    main()</pre>
+    </div>
+  </section>
+
+  <!-- ════════ 4. 로그 결과 ════════ -->
+  <section>
+    <h2 class="sect"><span class="no">4.</span>로그 결과 (실측)</h2>
+    <p class="sect-lead">Python 3.9.6에서 <span class="mono">python3 float_trace.py</span>를 실행한 출력 그대로.</p>
+    <div class="doodle tilt-r">
+<pre class="log-out">====================================================================================================
+size_5_1 패턴 × X 필터 MAC 추적 (main.py mac()과 같은 행 우선 순서)
+====================================================================================================
+
+[0] 재료 확인: 0.1은 float에 어떻게 저장되나
+    입력한 값        : 0.1
+    실제 저장된 값   : 0.100000000000000005551115123125...
+    분수로 정확히    : 3602879701896397/36028797018963968
+                      = 3602879701896397 / 2^55  (0.1보다 5.55e-18 큼)
+    2진수 전개       : 0.0001100110011001100... (1100 무한 반복 → 53비트에서 반올림)
+
+[1] 곱-누적 로그 (곱이 0인 16칸은 합을 바꾸지 않으므로 생략)
+
+  단계  (i,j)      p×f repr(누적합) — 파이썬이 출력하는 값  float에 실제 저장된 값               이론값           오차
+----------------------------------------------------------------------------------------------------
+   1 (0,0)  1×0.1  0.1                        0.1000000000000000055511        0.1    +5.55e-18
+   2 (0,4)  1×0.1  0.2                        0.2000000000000000111022        0.2    +1.11e-17
+   3 (1,1)  1×0.1  0.30000000000000004        0.3000000000000000444089        0.3    +4.44e-17
+   4 (1,3)  1×0.1  0.4                        0.4000000000000000222044        0.4    +2.22e-17
+   5 (2,2)  1×0.1  0.5                        0.5                             0.5    +0.00e+00
+   6 (3,1)  1×0.1  0.6                        0.5999999999999999777955        0.6    -2.22e-17
+   7 (3,3)  1×0.1  0.7                        0.6999999999999999555910        0.7    -4.44e-17
+   8 (4,0)  1×0.1  0.7999999999999999         0.7999999999999999333866        0.8    -6.66e-17
+   9 (4,4)  1×0.1  0.8999999999999999         0.8999999999999999111821        0.9    -8.88e-17
+----------------------------------------------------------------------------------------------------
+
+[2] 마지막 덧셈 확대: 8번째 합 + 0.1 이 왜 0.9에 못 미치나
+    8단계 합(저장값)      : 0.7999999999999999333866
+    + 저장된 0.1          : 0.1000000000000000055511
+    = 반올림 전 참값      : 0.8999999999999999389377
+    이 참값 근처의 float 눈금 (간격 = 1 ULP = 1.11e-16):
+      아래 눈금: 0.8999999999999999111821  ← 참값과의 거리 2.776e-17
+      위   눈금: 0.9000000000000000222044  ← 참값과의 거리 8.327e-17
+    → 참값이 아래 눈금에 더 가까워서 0.8999999999999999 로 반올림됨
+
+[3] 판정에 미치는 영향
+    Cross 점수: 0.9   (실제 저장값 0.9000000000000000222044)
+    X     점수: 0.8999999999999999   (실제 저장값 0.8999999999999999111821)
+    x == 0.9        → False
+    |Cross − X|     → 1.110e-16
+    epsilon(1e-9)   → 1.110e-16 &lt; 1e-9 → UNDECIDED (판정하지 않음)</pre>
+    </div>
+  </section>
+
+  <footer>
+    Codyssey Mission 3 — Mini NPU Simulator ·
+    <a href="https://github.com/newids/mission-3" style="color:var(--blue)">github.com/newids/mission-3</a>
+  </footer>
+</div>
+
+<script>
+(function(){
+  'use strict';
+  /* 장면 1: X 패턴 그리드 */
+  var grid = document.querySelector('.xgrid');
+  var order = 0;
+  for (var i = 0; i < 5; i++){
+    for (var j = 0; j < 5; j++){
+      var c = document.createElement('div');
+      var on = (i === j) || (i + j === 4);
+      c.className = 'c' + (on ? ' on pop' : '');
+      if (on){ c.style.setProperty('--d', (0.15 + order * 0.12).toFixed(2) + 's'); order++; }
+      grid.appendChild(c);
+    }
+  }
+
+  /* 장면 3: 비트 스트립 */
+  var strip = document.querySelector('.bitstrip');
+  var bits = '1100110011001100110011001100110011001100110011001101';
+  var tail = '110011001100';
+  var html = '<span class="b keep">1.</span>';
+  for (var k = 0; k < bits.length; k++) html += '<span class="b keep">' + bits[k] + '</span>';
+  html += '<span class="cutmark" aria-hidden="true">✂</span>';
+  for (var t = 0; t < tail.length; t++){
+    html += '<span class="b fall" style="--d:' + (0.5 + t * 0.09).toFixed(2) + 's">' + tail[t] + '</span>';
+  }
+  html += '<span class="b fall" style="--d:1.6s">…</span>';
+  strip.innerHTML = html;
+
+  /* 장면 4: 실측 로그 테이블 */
+  var rows = [
+    ['1','(0,0)','0.1','0.1000000000000000055511','+5.55e-18',68.2,1],
+    ['2','(0,4)','0.2','0.2000000000000000111022','+1.11e-17',72.2,1],
+    ['3','(1,1)','0.30000000000000004','0.3000000000000000444089','+4.44e-17',96.0,1],
+    ['4','(1,3)','0.4','0.4000000000000000222044','+2.22e-17',80.1,1],
+    ['5','(2,2)','0.5','0.5  (정확히 일치!)','±0',64.3,1],
+    ['6','(3,1)','0.6','0.5999999999999999777955','-2.22e-17',48.4,0],
+    ['7','(3,3)','0.7','0.6999999999999999555910','-4.44e-17',32.6,0],
+    ['8','(4,0)','0.7999999999999999','0.7999999999999999333866','-6.66e-17',16.7,0],
+    ['9','(4,4)','0.8999999999999999','0.8999999999999999111821','-8.88e-17',0.9,0]
+  ];
+  var tb = document.getElementById('logbody');
+  rows.forEach(function(r, idx){
+    var tr = document.createElement('tr');
+    tr.className = 'rise' + (idx === 8 ? ' hot' : '');
+    tr.style.setProperty('--d', (0.2 + idx * 0.45).toFixed(2) + 's');
+    tr.innerHTML =
+      '<td>' + r[0] + '</td><td class="mono">' + r[1] + '</td>' +
+      '<td class="mono">' + r[2] + '</td><td class="mono">' + r[3] + '</td>' +
+      '<td><span class="mono">' + r[4] + '</span> ' +
+      '<span class="meter"><span class="zero"></span>' +
+      '<span class="dot' + (r[6] ? ' pos' : '') + '" style="left:' + r[5] + '%"></span></span></td>';
+    tb.appendChild(tr);
+  });
+
+  /* 장면 플레이어 */
+  var scenes = Array.prototype.slice.call(document.querySelectorAll('.scene'));
+  var dotsNav = document.querySelector('.dots');
+  var prev = document.getElementById('prev');
+  var next = document.getElementById('next');
+  var where = document.getElementById('where');
+  var cur = 0;
+  scenes.forEach(function(s, i){
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = i + 1;
+    b.setAttribute('aria-label', (i + 1) + '번 장면으로 이동');
+    b.addEventListener('click', function(){ show(i); });
+    dotsNav.appendChild(b);
+  });
+  var dotBtns = Array.prototype.slice.call(dotsNav.children);
+  function show(i){
+    cur = Math.max(0, Math.min(scenes.length - 1, i));
+    scenes.forEach(function(s, k){ s.classList.toggle('active', k === cur); });
+    dotBtns.forEach(function(b, k){ b.classList.toggle('on', k === cur); });
+    prev.disabled = (cur === 0);
+    next.disabled = (cur === scenes.length - 1);
+    where.textContent = '장면 ' + (cur + 1) + ' / ' + scenes.length;
+  }
+  prev.addEventListener('click', function(){ show(cur - 1); });
+  next.addEventListener('click', function(){ show(cur + 1); });
+  document.addEventListener('keydown', function(e){
+    var tag = (e.target && e.target.tagName) || '';
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (e.key === 'ArrowRight') show(cur + 1);
+    if (e.key === 'ArrowLeft') show(cur - 1);
+  });
+  show(0);
+})();
+</script>
+</body>
+</html>
